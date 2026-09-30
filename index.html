@@ -1,0 +1,185 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0f172a"><link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Ascendant%20Sentiment%20Engine%22%2C%22short_name%22%3A%22Sentiment%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230f172a%22%2C%22theme_color%22%3A%22%230f172a%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22icon-192.png%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%22%7D%5D%7D"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png"><title>Ascendant Sentiment Engine</title>
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--g:#10b981;--r:#ef4444;--b:#3b82f6;--t:#f8fafc;--s:#94a3b8;--bd:#334155}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+body{background:var(--bg);color:var(--t);padding:14px;max-width:920px;margin:0 auto}
+h1{font-size:1.2rem;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:12px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,select,input{background:var(--bg);color:var(--t);border:1px solid var(--bd);border-radius:8px;padding:7px 10px;font-size:.85rem}
+button{cursor:pointer}button.on{background:var(--g);border-color:var(--g)}
+.big{font:800 2.4rem monospace}
+.badge{padding:3px 12px;border-radius:20px;font-weight:600;font-size:.9rem}
+.bull{background:#10b98133;color:#34d399}.bear{background:#ef444433;color:#f87171}.neu{background:#94a3b833;color:#cbd5e1}
+canvas{width:100%;height:280px;display:block;cursor:crosshair}
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+td,th{padding:5px;border-bottom:1px solid var(--bd);text-align:center}th{color:var(--s)}
+.sub{color:var(--s);font-size:.75rem}h2{font-size:.95rem;margin-bottom:8px}
+.sc{max-height:230px;overflow:auto}
+#pwa-install{display:none;background:var(--b);border-color:var(--b);color:#fff;font-weight:600}
+</style></head><body>
+<h1>
+  <span>Ascendant Sentiment Engine <span class="sub">Brent CFD · offline</span></span>
+  <button id="pwa-install">📲 Install App</button>
+</h1>
+<div class="sub" id="clk" style="margin:-4px 0 10px"></div>
+<div class="card"><div class="row">
+<button id="live" class="on">● Live</button><input type="datetime-local" id="dt">
+<button data-s="-1440">−1d</button><button data-s="-60">−1h</button><button data-s="-5">−5m</button><button data-s="5">+5m</button><button data-s="60">+1h</button><button data-s="1440">+1d</button>
+</div><div class="row" style="margin-top:8px">
+<select id="loc"></select><select id="tz"></select>
+<select id="win"><option value="6" selected>Window 6h</option><option value="12">Window 12h</option><option value="24">Window 24h</option><option value="48">Window 48h</option></select>
+</div></div>
+<div class="card"><div class="row" style="justify-content:space-between"><div><div class="sub">Sentiment index S</div><div class="big" id="sv">0.000</div></div>
+<div style="text-align:right"><span class="badge neu" id="bd">NEUTRAL</span><div class="sub" id="tm" style="margin-top:6px"></div><div class="sub" id="ac"></div></div></div></div>
+<div class="card"><h2>S per 5-min bar <span class="sub">(bars = S, yellow = 30-min average; tap a bar to inspect)</span></h2><canvas id="cv"></canvas></div>
+<div class="card"><h2>Active Ascendant aspects</h2><div class="sc"><table id="at"></table></div></div>
+<div class="card"><h2>Exact Ascendant hits in window</h2><div class="sc"><table id="ev"></table></div></div>
+<div class="card"><h2>Same moment in other time zones</h2><div id="zn" class="sub" style="line-height:1.8"></div></div>
+<p class="sub">S = ΣSp·Wp·Cj / ΣWp over active aspects (orb 3°). Bullish above +0.15, bearish below −0.15. Positions use built-in Meeus/Schlyter algorithms (arc-minute accuracy, ample for 3° orbs), not the Swiss Ephemeris files themselves. Time zones and UK BST/GMT changes are handled automatically.</p>
+<script>
+const R=Math.PI/180,rev=x=>((x%360)+360)%360,sn=x=>Math.sin(x*R),cs=x=>Math.cos(x*R),$=i=>document.getElementById(i);
+// Moon Wp changed to 3
+const PL=[["Pluto","♇",6,-1],["Mercury","☿",5,0],["Mars","♂",4,1],["Moon","☽",3,0],["Saturn","♄",4,-1],["Sun","☉",3,1],["Venus","♀",4,1],["Uranus","♅",3,0],["Jupiter","♃",3,1],["Neptune","♆",2,1]];
+const ANG=[0,30,45,60,72,90,120,135,144,150,180],NEG=[45,90,135,150,180],ORB=3;
+// Updated 180° Cj to 0.24
+const RED={0:.50,45:.50,90:.62,135:.5,150:.5,180:.24,30:.24,72:.38,60:.38,120:.24,144:.24};
+const GRN={0:.50,60:.85,45:.50,120:.62,30:.24,72:.38,144:.24,90:.38,135:.24,150:.24,180:.24};
+const CONJ_POS=["Moon","Mercury","Venus","Jupiter","Uranus","Neptune"];
+const CONJ_NEG=["Pluto","Saturn","Mars","Sun"];
+const POS_45=["Moon","Mercury","Sun","Mars","Uranus"];
+
+const EL={Mercury:[48.3313,3.24587e-5,7.0047,5e-8,29.1241,1.01444e-5,.387098,0,.205635,5.59e-10,168.6562,4.0923344368],
+Venus:[76.6799,2.4659e-5,3.3946,2.75e-8,54.891,1.38374e-5,.72333,0,.006773,-1.302e-9,48.0052,1.6021302244],
+Mars:[49.5574,2.11081e-5,1.8497,-1.78e-8,286.5016,2.92961e-5,1.523688,0,.093405,2.516e-9,18.6021,.5240207766],
+Jupiter:[100.4542,2.76854e-5,1.303,-1.557e-7,273.8777,1.64505e-5,5.20256,0,.048498,4.469e-9,19.895,.0830853001],
+Saturn:[113.6634,2.3898e-5,2.4886,-1.081e-7,339.3939,2.97661e-5,9.55475,0,.055546,-9.499e-9,316.967,.0334442282],
+Uranus:[74.0005,1.3978e-5,.7733,1.9e-8,96.6612,3.0565e-5,19.18171,-1.55e-8,.047318,7.45e-9,142.5905,.011725806],
+Neptune:[131.7806,3.0173e-5,1.77,-2.55e-7,272.8461,-6.027e-6,30.05826,3.313e-8,.008606,2.15e-9,260.2471,.005995147],
+Moon:[125.1228,-.0529538083,5.1454,0,318.0634,.1643573223,60.2666,0,.0549,0,115.3654,13.0649929509]};
+function orb(n,d){const e=EL[n],N=e[0]+e[1]*d,i=e[2]+e[3]*d,w=e[4]+e[5]*d,a=e[6]+e[7]*d,ec=e[8]+e[9]*d,M=rev(e[10]+e[11]*d);
+let E=M+ec/R*sn(M)*(1+ec*cs(M));for(let k=0;k<4;k++)E-=(E-ec/R*sn(E)-M)/(1-ec*cs(E));
+const xv=a*(cs(E)-ec),yv=a*Math.sqrt(1-ec*ec)*sn(E),v=Math.atan2(yv,xv)/R,r=Math.hypot(xv,yv),u=v+w;
+return{x:r*(cs(N)*cs(u)-sn(N)*sn(u)*cs(i)),y:r*(sn(N)*cs(u)+cs(N)*sn(u)*cs(i)),z:r*sn(u)*sn(i),r,M,w,N}}
+const C=new Map();
+function pos(ms){if(C.has(ms))return C.get(ms);if(C.size>4000)C.clear();
+const d=ms/864e5+2440587.5-2451543.5,L={};
+const sw=282.9404+4.70935e-5*d,se=.016709-1.151e-9*d,sM=rev(356.047+.9856002585*d);
+const sE=sM+se/R*sn(sM)*(1+se*cs(sM)),sx=cs(sE)-se,sy=Math.sqrt(1-se*se)*sn(sE),sl=Math.atan2(sy,sx)/R+sw,sr=Math.hypot(sx,sy),xs=sr*cs(sl),ys=sr*sn(sl);L.Sun=rev(sl);
+const m=orb("Moon",d),Lm=m.M+m.w+m.N,Ls=sM+sw,D=Lm-Ls,F=Lm-m.N,Mm=m.M;
+L.Moon=rev(Math.atan2(m.y,m.x)/R-1.274*sn(Mm-2*D)+.658*sn(2*D)-.186*sn(sM)-.059*sn(2*Mm-2*D)-.057*sn(Mm-2*D+sM)+.053*sn(Mm+2*D)+.046*sn(2*D-sM)+.041*sn(Mm-sM)-.035*sn(D)-.031*sn(Mm+sM)-.015*sn(2*F-2*D)+.011*sn(Mm-4*D));
+const O={};["Mercury","Venus","Mars","Jupiter","Saturn","Uranus","Neptune"].forEach(n=>O[n]=orb(n,d));
+const Mj=O.Jupiter.M,Ms=O.Saturn.M,Mu=O.Uranus.M;
+const P={Jupiter:-.332*sn(2*Mj-5*Ms-67.6)-.056*sn(2*Mj-2*Ms+21)+.042*sn(3*Mj-5*Ms+21)-.036*sn(Mj-2*Ms)+.022*cs(Mj-Ms)+.023*sn(2*Mj-3*Ms+52)-.016*sn(Mj-5*Ms-69),
+Saturn:.812*sn(2*Mj-5*Ms-67.6)-.229*cs(2*Mj-4*Ms-2)+.119*sn(Mj-2*Ms-3)+.046*sn(2*Mj-6*Ms-69)+.014*sn(Mj-3*Ms+32),
+Uranus:.04*sn(Ms-2*Mu+6)+.035*sn(Ms-3*Mu+33)-.015*sn(Mj-Mu+20)};
+for(const n in O){const o=O[n],lon=Math.atan2(o.y,o.x)/R+(P[n]||0),lat=Math.atan2(o.z,Math.hypot(o.x,o.y))/R;
+L[n]=rev(Math.atan2(o.r*cs(lat)*sn(lon)+ys,o.r*cs(lat)*cs(lon)+xs)/R)}
+const Sx=50.03+.033459652*d,Pp=238.95+.003968789*d;
+const pl=238.9508+.00400703*d-19.799*sn(Pp)+19.848*cs(Pp)+.897*sn(2*Pp)-4.956*cs(2*Pp)+.61*sn(3*Pp)+1.211*cs(3*Pp)-.341*sn(4*Pp)-.19*cs(4*Pp)+.128*sn(5*Pp)-.034*cs(5*Pp)-.038*sn(6*Pp)+.031*cs(6*Pp)+.02*sn(Sx-Pp)-.01*cs(Sx-Pp);
+const pb=-5.452*sn(Pp)-14.974*cs(Pp)+3.527*sn(2*Pp)+1.673*cs(2*Pp)-1.051*sn(3*Pp)+.328*cs(3*Pp)+.179*sn(4*Pp)-.292*cs(4*Pp)+.019*sn(5*Pp)+.1*cs(5*Pp)-.031*sn(6*Pp)-.026*cs(6*Pp)+.011*cs(Sx-Pp);
+const pr=40.72+6.68*sn(Pp)+6.9*cs(Pp)-1.18*sn(2*Pp)-.03*cs(2*Pp)+.15*sn(3*Pp)-.14*cs(3*Pp);
+L.Pluto=rev(Math.atan2(pr*cs(pb)*sn(pl)+ys,pr*cs(pb)*cs(pl)+xs)/R);
+const a=PL.map(p=>L[p[0]]);C.set(ms,a);return a}
+function asc(ms,loc){const jd=ms/864e5+2440587.5,dd=jd-2451545,T=dd/36525,th=rev(280.46061837+360.98564736629*dd+3.87933e-4*T*T+loc.lon),eps=23.4393-3.563e-7*(jd-2451543.5);
+return rev(Math.atan2(cs(th),-(sn(th)*cs(eps)+Math.tan(loc.lat*R)*sn(eps)))/R)}
+const sep=(a,b)=>Math.abs(((a-b+540)%360)-180);
+function getPolarity(n, A, defaultPol) {
+  if (A === 0) return CONJ_POS.includes(n) ? 1 : -1;
+  if (A === 45 && POS_45.includes(n)) return 1;
+  if ((n === "Mars" || n === "Sun") && NEG.includes(A)) return -1;
+  return defaultPol || (NEG.includes(A) ? -1 : 1);
+}
+function aspects(as,l){const o=[];PL.forEach(([n,g,W,pol],k)=>{const sp=sep(as,l[k]);ANG.forEach(A=>{const d=Math.abs(sp-A);if(d<=ORB){
+  let s = getPolarity(n, A, pol);
+  let c = (s<0?RED:GRN)[A];
+  if (pol === 0 && A === 150) c = 0.38; // Neutral planets 150° adjustment
+  o.push({n,g,W,A,d,s,c})
+}})});return o}
+function score(h){if(!h.length)return 0;let a=0,b=0;h.forEach(x=>{a+=x.s*x.W*x.c;b+=x.W});return a/b}
+function series(cm,hrs,loc){const st=3e5,t0=Math.round((cm-hrs*1800000)/st)*st,arr=[];for(let i=0;i<=hrs*12;i++){const t=t0+i*st,l=pos(t),as=asc(t,loc),h=aspects(as,l);arr.push({t,as,l,h,S:score(h)})}return arr}
+const LOC=[["London",51.5074,-.1278],["New York",40.7128,-74.006],["Harare",-17.8292,31.0522],["Dubai",25.2048,55.2708],["Singapore",1.3521,103.8198],["Tokyo",35.6762,139.6503]].map(x=>({n:x[0],lat:x[1],lon:x[2]}));
+const TZ=["Europe/London","UTC","Africa/Harare","America/New_York","Asia/Dubai","Asia/Singapore","Asia/Tokyo"];
+const S={live:true,c:0,ins:0,hrs:6,loc:0,tz:TZ[0]};let cur=[];
+const fm=(t,tz,o)=>new Intl.DateTimeFormat('en-GB',{timeZone:tz,...o}).format(t);
+const hm=t=>fm(t,S.tz,{hour:'2-digit',minute:'2-digit',hour12:false});
+const off=(t,tz)=>{const p={};new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric'}).formatToParts(t).forEach(x=>p[x.type]=+x.value);return(Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute)-Math.floor(t/6e4)*6e4)/6e4};
+const toLocal=(t,tz)=>new Date(t+off(t,tz)*6e4).toISOString().slice(0,16);
+const fromLocal=(s,tz)=>{const t=Date.parse(s+':00Z');let m=t-off(t,tz)*6e4;return t-off(m,tz)*6e4};
+const SG=["Aries","Taurus","Gemini","Cancer","Leo","Virgo","Libra","Scorpio","Sagittarius","Capricorn","Aquarius","Pisces"];
+const dms=x=>`${Math.floor(x%30)}°${String(Math.floor(x%1*60)).padStart(2,'0')}′ ${SG[Math.floor(x/30)]}`;
+function draw(sr,qi){const c=$('cv'),dpr=devicePixelRatio||1,W=c.clientWidth,H=280;c.width=W*dpr;c.height=H*dpr;const x=c.getContext('2d');x.scale(dpr,dpr);
+const Lm=38,B=22,T=8,pw=W-Lm-8,ph=H-B-T,ym=Math.max(.5,Math.ceil(Math.max(...sr.map(q=>Math.abs(q.S)))*10)/10+.1),Y=v=>T+ph/2*(1-v/ym),n=sr.length,bw=pw/n;
+x.fillStyle='#0f172a';x.fillRect(0,0,W,H);
+x.fillStyle='#10b98120';x.fillRect(Lm,T,pw,Y(.15)-T);x.fillStyle='#ef444420';x.fillRect(Lm,Y(-.15),pw,T+ph-Y(-.15));
+x.font='10px sans-serif';x.strokeStyle='#334155';x.fillStyle='#94a3b8';x.textAlign='right';
+[ym,.15,0,-.15,-ym].forEach(v=>{x.beginPath();x.moveTo(Lm,Y(v));x.lineTo(Lm+pw,Y(v));x.stroke();x.fillText(v.toFixed(2),Lm-4,Y(v)+3)});
+sr.forEach((q,i)=>{x.fillStyle=q.S>.15?'#10b981':q.S<-.15?'#ef4444':'#64748b';const y0=Y(0),y1=Y(q.S);x.fillRect(Lm+i*bw,Math.min(y0,y1),Math.max(bw-.6,1),Math.max(Math.abs(y1-y0),q.S?1:0))});
+x.beginPath();x.strokeStyle='#fbbf24';x.lineWidth=2;sr.forEach((q,i)=>{let s=0,k=0;for(let j=i-3;j<=i+2;j++)if(sr[j]){s+=sr[j].S;k++}const px=Lm+(i+.5)*bw,py=Y(s/k);i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke();x.lineWidth=1;
+x.textAlign='center';x.fillStyle='#94a3b8';const ts=S.hrs/6;sr.forEach((q,i)=>{if(q.t%(ts*36e5)===0)x.fillText(hm(q.t),Lm+(i+.5)*bw,H-6)});
+const now=Date.now(),ni=(now-sr[0].t)/3e5;if(ni>=0&&ni<=n){x.strokeStyle='#f59e0b';x.setLineDash([4,3]);x.beginPath();x.moveTo(Lm+ni*bw,T);x.lineTo(Lm+ni*bw,T+ph);x.stroke();x.setLineDash([])}
+x.strokeStyle='#fff';x.beginPath();x.moveTo(Lm+(qi+.5)*bw,T);x.lineTo(Lm+(qi+.5)*bw,T+ph);x.stroke();c._g={Lm,bw,n}}
+
+function update(){
+  if(S.live){
+    S.c=Math.floor(Date.now()/3e5)*3e5;
+    S.ins=S.c + 3e5;
+  }
+  const loc=LOC[S.loc];cur=series(S.c,S.hrs,loc);const qi=Math.max(0,Math.min(cur.length-1,Math.round((S.ins-cur[0].t)/3e5))),q=cur[qi];
+  draw(cur,qi);$('live').className=S.live?'on':'';if(document.activeElement!==$('dt'))$('dt').value=toLocal(q.t,S.tz);
+  $('sv').textContent=(q.S>0?'+':'')+q.S.toFixed(3);$('sv').style.color=q.S>.15?'#34d399':q.S<-.15?'#f87171':'#cbd5e1';
+  const bd=$('bd');bd.textContent=q.S>.15?'BULLISH':q.S<-.15?'BEARISH':'NEUTRAL';bd.className='badge '+(q.S>.15?'bull':q.S<-.15?'bear':'neu');
+  $('tm').textContent=fm(q.t,S.tz,{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false,timeZoneName:'short'});$('ac').textContent=`ASC ${dms(q.as)} · ${loc.n}`;
+  const h=[...q.h].sort((a,b)=>Math.abs(b.s*b.W*b.c)-Math.abs(a.s*a.W*a.c));
+  $('at').innerHTML='<tr><th>Planet</th><th>Aspect</th><th>Orb</th><th>Sp</th><th>Wp</th><th>Cj</th><th>Sp·Wp·Cj</th></tr>'+(h.length?h.map(x=>`<tr><td>${x.g} ${x.n}</td><td>${x.A}°</td><td>${x.d.toFixed(2)}°</td><td style="color:${x.s>0?'#34d399':'#f87171'}">${x.s>0?'+1':'−1'}</td><td>${x.W}</td><td>${x.c}</td><td>${(x.s*x.W*x.c).toFixed(2)}</td></tr>`).join(''):'<tr><td colspan="7" class="sub">No aspects to the Ascendant at this moment</td></tr>');
+  const ev=[];for(let i=0;i<cur.length-1;i++){const a=cur[i],b=cur[i+1];PL.forEach((p,k)=>{const sa=sep(a.as,a.l[k]),sb=sep(b.as,b.l[k]);ANG.forEach(A=>{const fa=sa-A,fb=sb-A;if(fa*fb<0&&Math.abs(fa)<8&&Math.abs(fb)<8){
+    const s = getPolarity(p[0], A, p[3]);
+    let c = (s<0?RED:GRN)[A];
+    if (p[3] === 0 && A === 150) c = 0.38;
+    ev.push({t:a.t+fa/(fa-fb)*3e5,p,A,s,c})
+  }})}
+)}
+  ev.sort((a,b)=>a.t-b.t);const nw=Date.now();
+  $('ev').innerHTML='<tr><th>Time</th><th>Planet</th><th>Aspect</th><th>Pol</th><th>Cj</th></tr>'+(ev.length?ev.map(e=>`<tr style="opacity:${e.t<nw?.5:1}"><td>${hm(e.t)}</td><td>${e.p[1]} ${e.p[0]}</td><td>${e.A}°</td><td style="color:${e.s>0?'#34d399':'#f87171'}">${e.s>0?'▲ +1':'▼ −1'}</td><td>${e.c}</td></tr>`).join(''):'<tr><td colspan="5" class="sub">None in window</td></tr>');
+  $('zn').innerHTML=TZ.map(z=>`<b>${z.split('/').pop().replace('_',' ')}</b>: ${fm(q.t,z,{weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false,timeZoneName:'short'})}`).join(' &nbsp;·&nbsp; ');
+}
+
+$('loc').innerHTML=LOC.map((l,i)=>`<option value="${i}">ASC for ${l.n}</option>`).join('');
+$('tz').innerHTML=TZ.map(z=>`<option>${z}</option>`).join('');
+$('loc').onchange=e=>{S.loc=+e.target.value;update()};$('tz').onchange=e=>{S.tz=e.target.value;update()};$('win').onchange=e=>{S.hrs=+e.target.value;update()};
+$('live').onclick=()=>{S.live=!S.live;update()};$('dt').onchange=e=>{if(e.target.value){S.live=false;S.c=S.ins=Math.round(fromLocal(e.target.value,S.tz)/3e5)*3e5;update()}};
+document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{S.live=false;S.c=S.ins=S.ins+ +b.dataset.s*6e4;update()});
+$('cv').onclick=e=>{const c=$('cv'),g=c._g,i=Math.floor((e.clientX-c.getBoundingClientRect().left-g.Lm)/g.bw);if(i>=0&&i<g.n){S.live=false;S.ins=cur[i].t;update()}};
+
+addEventListener('resize',update);
+
+const tick=()=>{
+  const now = Date.now();
+  $('clk').textContent='Now: '+fm(now,S.tz,{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZoneName:'short'})+(S.live?' · LIVE':' · paused');
+  if(S.live){
+    update();
+  }
+};
+setInterval(tick,1000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(S.live)update();tick()}});
+
+if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+  const swCode = `self.addEventListener('fetch', e => e.respondWith(fetch(e.request)));`;
+  const swBlob = new Blob([swCode], { type: 'application/javascript' });
+  navigator.serviceWorker.register(URL.createObjectURL(swBlob));
+}
+
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  const btn = $('pwa-install');
+  btn.style.display = 'inline-block';
+  btn.onclick = () => {
+    btn.style.display = 'none';
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then(() => { deferredPrompt = null; });
+  };
+});
+
+update();tick();
+</script></body></html>
